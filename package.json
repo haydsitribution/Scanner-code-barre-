@@ -1,0 +1,49 @@
+{
+  "name": "barcode-scanner-sdk",
+  "version": "0.0.1",
+  "description": "Open-source barcode scanner SDK for the web. Strich-quality EAN/UPC scanning with zero license cost.",
+  "type": "module",
+  "license": "MIT",
+  "files": ["dist", "README.md"],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./style.css": "./dist/style.css",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": ["**/*.css"],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:demo": "vite build --mode demo",
+    "check": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-dom": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "@types/react": "^18.3.28",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.2",
+    "vite-plugin-dts": "^4.5.4"
+  },
+  "dependencies": {
+    "zxing-wasm": "^3.0.2"
+  }
+}
