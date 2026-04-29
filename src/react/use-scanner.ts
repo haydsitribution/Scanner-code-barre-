@@ -6,6 +6,7 @@ import {
   type RefObject,
 } from "react";
 import { ScannerEngine, type ScannerEngineOptions } from "@/core/scanner-engine";
+import type { CameraCapabilitiesInfo } from "@/core/camera";
 import type { FrameStats, ScanResult } from "@/core/types";
 
 export interface UseScannerOptions
@@ -25,9 +26,12 @@ export interface UseScannerHandle {
   error: Error | null;
   hasTorch: boolean;
   torchOn: boolean;
+  cameraInfo: CameraCapabilitiesInfo | null;
   start: () => Promise<void>;
   stop: () => void;
   toggleTorch: () => Promise<void>;
+  setZoom: (zoom: number) => Promise<void>;
+  tapToFocus: (xRatio: number, yRatio: number) => Promise<void>;
 }
 
 export function useScanner(options: UseScannerOptions): UseScannerHandle {
@@ -45,6 +49,7 @@ export function useScanner(options: UseScannerOptions): UseScannerHandle {
   const [error, setError] = useState<Error | null>(null);
   const [hasTorch, setHasTorch] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [cameraInfo, setCameraInfo] = useState<CameraCapabilitiesInfo | null>(null);
 
   const start = useCallback(async () => {
     if (engineRef.current) return;
@@ -78,6 +83,7 @@ export function useScanner(options: UseScannerOptions): UseScannerHandle {
       await engine.start();
       setIsScanning(true);
       setHasTorch(engine.hasTorch());
+      setCameraInfo(engine.getCameraInfo());
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       setError(e);
@@ -100,6 +106,7 @@ export function useScanner(options: UseScannerOptions): UseScannerHandle {
     setIsScanning(false);
     setHasTorch(false);
     setTorchOn(false);
+    setCameraInfo(null);
   }, []);
 
   const toggleTorch = useCallback(async () => {
@@ -115,6 +122,30 @@ export function useScanner(options: UseScannerOptions): UseScannerHandle {
       onErrorRef.current?.(e);
     }
   }, [torchOn]);
+
+  const setZoomLevel = useCallback(async (zoom: number) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    try {
+      await engine.setZoom(zoom);
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      setError(e);
+      onErrorRef.current?.(e);
+    }
+  }, []);
+
+  const tapToFocus = useCallback(async (xRatio: number, yRatio: number) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    try {
+      await engine.tapToFocus(xRatio, yRatio);
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      setError(e);
+      onErrorRef.current?.(e);
+    }
+  }, []);
 
   const enabled = options.enabled ?? false;
 
@@ -140,8 +171,11 @@ export function useScanner(options: UseScannerOptions): UseScannerHandle {
     error,
     hasTorch,
     torchOn,
+    cameraInfo,
     start,
     stop,
     toggleTorch,
+    setZoom: setZoomLevel,
+    tapToFocus,
   };
 }

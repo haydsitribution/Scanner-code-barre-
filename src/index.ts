@@ -15,6 +15,12 @@ export {
   type ScannerEngineOptions,
 } from "./core/scanner-engine";
 
+export type {
+  CameraCapabilitiesInfo,
+  CameraStream,
+  OpenCameraOptions,
+} from "./core/camera";
+
 export {
   useScanner,
   type UseScannerOptions,

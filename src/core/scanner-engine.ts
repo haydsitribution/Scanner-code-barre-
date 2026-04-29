@@ -2,8 +2,14 @@ import DecoderWorker from "./decoder.worker.ts?worker&inline";
 import {
   applyTorch,
   closeCamera,
+  describeCameraCapabilities,
   openCamera,
+  setFocusContinuous,
+  setFocusManual,
+  setPointOfInterest,
+  setZoom,
   streamHasTorch,
+  type CameraCapabilitiesInfo,
   type CameraStream,
   type OpenCameraOptions,
 } from "./camera";
@@ -170,6 +176,32 @@ export class ScannerEngine {
   async toggleTorch(on: boolean): Promise<void> {
     if (!this.camera) throw new Error("camera not running");
     await applyTorch(this.camera, on);
+  }
+
+  getCameraInfo(): CameraCapabilitiesInfo | null {
+    return this.camera ? describeCameraCapabilities(this.camera) : null;
+  }
+
+  async setZoom(zoom: number): Promise<void> {
+    if (!this.camera) throw new Error("camera not running");
+    await setZoom(this.camera, zoom);
+  }
+
+  async tapToFocus(xRatio: number, yRatio: number): Promise<void> {
+    if (!this.camera) throw new Error("camera not running");
+    await setPointOfInterest(this.camera, xRatio, yRatio);
+  }
+
+  async setFocus(mode: "continuous" | "manual", distance?: number): Promise<void> {
+    if (!this.camera) throw new Error("camera not running");
+    if (mode === "continuous") {
+      await setFocusContinuous(this.camera);
+    } else {
+      if (typeof distance !== "number") {
+        throw new Error("manual focus requires a distance");
+      }
+      await setFocusManual(this.camera, distance);
+    }
   }
 
   private spawnWorker(): Worker {
