@@ -1,14 +1,18 @@
 import { useCallback } from "react";
 import { useScanner, type UseScannerOptions } from "./use-scanner";
 import { DEFAULT_ROI } from "@/core/scanner-engine";
-import type { ScanResult } from "@/core/types";
+import type { FrameStats, ScanResult } from "@/core/types";
 import "@/styles/ui.css";
 
 export interface BarcodeScannerViewProps
-  extends Omit<UseScannerOptions, "onDetect" | "onError" | "enabled"> {
+  extends Omit<
+    UseScannerOptions,
+    "onDetect" | "onError" | "enabled" | "onFrameStats"
+  > {
   active?: boolean;
   onScan: (result: ScanResult) => void;
   onError?: (err: Error) => void;
+  onFrameStats?: (stats: FrameStats) => void;
   hideTorchButton?: boolean;
   className?: string;
   style?: React.CSSProperties;
@@ -18,6 +22,7 @@ export function BarcodeScannerView({
   active = true,
   onScan,
   onError,
+  onFrameStats,
   hideTorchButton = false,
   className,
   style,
@@ -25,6 +30,7 @@ export function BarcodeScannerView({
   roi,
   cooldownMs,
   stableFrames,
+  quality,
   camera,
 }: BarcodeScannerViewProps) {
   const handleDetect = useCallback(
@@ -38,10 +44,12 @@ export function BarcodeScannerView({
     enabled: active,
     onDetect: handleDetect,
     onError,
+    onFrameStats,
     formats,
     roi,
     cooldownMs,
     stableFrames,
+    quality,
     camera,
   });
 

@@ -6,13 +6,17 @@ import {
   type RefObject,
 } from "react";
 import { ScannerEngine, type ScannerEngineOptions } from "@/core/scanner-engine";
-import type { ScanResult } from "@/core/types";
+import type { FrameStats, ScanResult } from "@/core/types";
 
 export interface UseScannerOptions
-  extends Omit<ScannerEngineOptions, "video" | "onDetect" | "onError"> {
+  extends Omit<
+    ScannerEngineOptions,
+    "video" | "onDetect" | "onError" | "onFrameStats"
+  > {
   enabled?: boolean;
   onDetect: (result: ScanResult) => void;
   onError?: (err: Error) => void;
+  onFrameStats?: (stats: FrameStats) => void;
 }
 
 export interface UseScannerHandle {
@@ -32,8 +36,10 @@ export function useScanner(options: UseScannerOptions): UseScannerHandle {
 
   const onDetectRef = useRef(options.onDetect);
   const onErrorRef = useRef(options.onError);
+  const onFrameStatsRef = useRef(options.onFrameStats);
   onDetectRef.current = options.onDetect;
   onErrorRef.current = options.onError;
+  onFrameStatsRef.current = options.onFrameStats;
 
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -57,12 +63,14 @@ export function useScanner(options: UseScannerOptions): UseScannerHandle {
       roi: options.roi,
       cooldownMs: options.cooldownMs,
       stableFrames: options.stableFrames,
+      quality: options.quality,
       camera: options.camera,
       onDetect: (result) => onDetectRef.current(result),
       onError: (err) => {
         setError(err);
         onErrorRef.current?.(err);
       },
+      onFrameStats: (stats) => onFrameStatsRef.current?.(stats),
     });
     engineRef.current = engine;
 
@@ -82,6 +90,7 @@ export function useScanner(options: UseScannerOptions): UseScannerHandle {
     options.roi,
     options.cooldownMs,
     options.stableFrames,
+    options.quality,
     options.camera,
   ]);
 

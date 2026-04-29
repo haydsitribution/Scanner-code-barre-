@@ -1,5 +1,7 @@
 export type {
   BarcodeFormat,
+  DecodeQuality,
+  FrameStats,
   ScanResult,
   WorkerInMessage,
   WorkerOutMessage,

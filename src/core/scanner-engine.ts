@@ -10,7 +10,10 @@ import {
 import {
   RETAIL_FORMATS,
   type BarcodeFormat,
+  type DecodeQuality,
+  type FrameStats,
   type ScanResult,
+  type WorkerFrameMetrics,
   type WorkerInMessage,
   type WorkerOutMessage,
 } from "./types";
@@ -29,15 +32,19 @@ export const DEFAULT_ROI: RegionOfInterest = {
   height: 0.3,
 };
 
+const MAX_CAPTURE_WIDTH = 960;
+
 export interface ScannerEngineOptions {
   video: HTMLVideoElement;
   formats?: readonly BarcodeFormat[];
   roi?: RegionOfInterest;
   cooldownMs?: number;
   stableFrames?: number;
+  quality?: DecodeQuality;
   camera?: OpenCameraOptions;
   onDetect: (result: ScanResult) => void;
   onError?: (err: Error) => void;
+  onFrameStats?: (stats: FrameStats) => void;
 }
 
 function supportsRVFC(
@@ -49,16 +56,24 @@ function supportsRVFC(
   return typeof video.requestVideoFrameCallback === "function";
 }
 
+interface RequiredOptions {
+  video: HTMLVideoElement;
+  formats: readonly BarcodeFormat[];
+  roi: RegionOfInterest;
+  cooldownMs: number;
+  stableFrames: number;
+  quality: DecodeQuality;
+  onDetect: (result: ScanResult) => void;
+  camera?: OpenCameraOptions;
+  onError?: (err: Error) => void;
+  onFrameStats?: (stats: FrameStats) => void;
+}
+
 export class ScannerEngine {
-  private readonly options: Required<
-    Omit<ScannerEngineOptions, "camera" | "onError">
-  > & { camera?: OpenCameraOptions; onError?: (err: Error) => void };
+  private readonly options: RequiredOptions;
 
   private worker: Worker | null = null;
   private camera: CameraStream | null = null;
-
-  private canvas: HTMLCanvasElement | OffscreenCanvas | null = null;
-  private ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
 
   private rvfcHandle: number | null = null;
   private intervalHandle: number | null = null;
@@ -70,6 +85,10 @@ export class ScannerEngine {
   private streak = 0;
   private lastFireAt = 0;
 
+  private framesInWindow = 0;
+  private windowStart = 0;
+  private currentFps = 0;
+
   private state: "idle" | "starting" | "running" | "stopping" = "idle";
 
   constructor(options: ScannerEngineOptions) {
@@ -79,9 +98,11 @@ export class ScannerEngine {
       roi: options.roi ?? DEFAULT_ROI,
       cooldownMs: options.cooldownMs ?? 1500,
       stableFrames: options.stableFrames ?? 2,
+      quality: options.quality ?? "balanced",
       camera: options.camera,
       onDetect: options.onDetect,
       onError: options.onError,
+      onFrameStats: options.onFrameStats,
     };
   }
 
@@ -100,6 +121,8 @@ export class ScannerEngine {
       video.setAttribute("playsinline", "true");
       await video.play();
 
+      this.windowStart = performance.now();
+      this.framesInWindow = 0;
       this.state = "running";
       this.scheduleFrame();
     } catch (err) {
@@ -126,6 +149,8 @@ export class ScannerEngine {
     this.lastCode = null;
     this.streak = 0;
     this.inFlight = false;
+    this.currentFps = 0;
+    this.framesInWindow = 0;
 
     this.state = "idle";
   }
@@ -168,6 +193,7 @@ export class ScannerEngine {
       return;
     }
     this.inFlight = false;
+    this.emitStats(msg.metrics);
     const scan = msg.scan;
     if (scan) {
       this.evaluateDetection(scan);
@@ -175,6 +201,20 @@ export class ScannerEngine {
       this.lastCode = null;
       this.streak = 0;
     }
+  }
+
+  private emitStats(metrics: WorkerFrameMetrics): void {
+    const cb = this.options.onFrameStats;
+    if (!cb) return;
+    cb({
+      fps: this.currentFps,
+      decodeMs: metrics.decodeMs,
+      localizeMs: metrics.localizeMs,
+      meanLuma: metrics.meanLuma,
+      saturatedRatio: metrics.saturatedRatio,
+      bboxFrac: metrics.bboxFrac,
+      recoveryActive: metrics.recoveryActive,
+    });
   }
 
   private evaluateDetection(scan: ScanResult): void {
@@ -219,8 +259,20 @@ export class ScannerEngine {
   private tick(): void {
     if (this.state !== "running") return;
 
+    this.framesInWindow += 1;
+    const now = performance.now();
+    const elapsed = now - this.windowStart;
+    if (elapsed >= 1000) {
+      this.currentFps = (this.framesInWindow * 1000) / elapsed;
+      this.framesInWindow = 0;
+      this.windowStart = now;
+    }
+
     if (!this.inFlight) {
-      this.captureAndDecode();
+      void this.captureAndDecode().catch((err) => {
+        this.inFlight = false;
+        this.options.onError?.(err instanceof Error ? err : new Error(String(err)));
+      });
     }
 
     if (this.rvfcHandle !== null) {
@@ -231,7 +283,7 @@ export class ScannerEngine {
     }
   }
 
-  private captureAndDecode(): void {
+  private async captureAndDecode(): Promise<void> {
     const video = this.options.video;
     const worker = this.worker;
     if (!worker || !video.videoWidth || !video.videoHeight) return;
@@ -242,53 +294,40 @@ export class ScannerEngine {
     const sw = Math.max(1, Math.floor(video.videoWidth * roi.width));
     const sh = Math.max(1, Math.floor(video.videoHeight * roi.height));
 
-    const ctx = this.ensureContext(sw, sh);
-    if (!ctx) return;
+    const scale = sw > MAX_CAPTURE_WIDTH ? MAX_CAPTURE_WIDTH / sw : 1;
+    const dw = Math.max(1, Math.round(sw * scale));
+    const dh = Math.max(1, Math.round(sh * scale));
 
+    this.inFlight = true;
+    let bitmap: ImageBitmap;
     try {
-      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+      bitmap = await createImageBitmap(video, sx, sy, sw, sh, {
+        resizeWidth: dw,
+        resizeHeight: dh,
+        resizeQuality: "medium",
+      });
     } catch {
+      this.inFlight = false;
       return;
     }
 
-    const imageData = ctx.getImageData(0, 0, sw, sh);
     const id = ++this.requestId;
     const msg: WorkerInMessage = {
       type: "decode",
       id,
-      imageData,
+      bitmap,
+      width: dw,
+      height: dh,
       formats: this.options.formats,
+      quality: this.options.quality,
     };
-    this.inFlight = true;
-    worker.postMessage(msg);
-  }
-
-  private ensureContext(
-    width: number,
-    height: number,
-  ): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null {
-    if (!this.canvas) {
-      if (typeof OffscreenCanvas !== "undefined") {
-        this.canvas = new OffscreenCanvas(width, height);
-      } else {
-        this.canvas = document.createElement("canvas");
-      }
+    try {
+      worker.postMessage(msg, [bitmap]);
+    } catch (err) {
+      this.inFlight = false;
+      bitmap.close();
+      throw err;
     }
-    if (this.canvas.width !== width || this.canvas.height !== height) {
-      this.canvas.width = width;
-      this.canvas.height = height;
-      this.ctx = null;
-    }
-    if (!this.ctx) {
-      const ctx = this.canvas.getContext("2d", {
-        willReadFrequently: true,
-      } as CanvasRenderingContext2DSettings);
-      this.ctx = ctx as
-        | CanvasRenderingContext2D
-        | OffscreenCanvasRenderingContext2D
-        | null;
-    }
-    return this.ctx;
   }
 
   private cleanupAfterFailure(): void {

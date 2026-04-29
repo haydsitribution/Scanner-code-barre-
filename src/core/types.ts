@@ -22,17 +22,39 @@ export const RETAIL_FORMATS: readonly BarcodeFormat[] = [
   "UPCE",
 ] as const;
 
+export type DecodeQuality = "fast" | "balanced" | "robust";
+
 export interface ScanResult {
   code: string;
   format: BarcodeFormat;
   rawBytes?: Uint8Array;
 }
 
+export interface RoiPx {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface FrameStats {
+  fps: number;
+  decodeMs: number;
+  localizeMs: number;
+  meanLuma: number;
+  saturatedRatio: number;
+  bboxFrac: number;
+  recoveryActive: boolean;
+}
+
 export interface WorkerDecodeRequest {
   type: "decode";
   id: number;
-  imageData: ImageData;
+  bitmap: ImageBitmap;
+  width: number;
+  height: number;
   formats: readonly BarcodeFormat[];
+  quality: DecodeQuality;
 }
 
 export interface WorkerReadyRequest {
@@ -41,10 +63,20 @@ export interface WorkerReadyRequest {
 
 export type WorkerInMessage = WorkerDecodeRequest | WorkerReadyRequest;
 
+export interface WorkerFrameMetrics {
+  decodeMs: number;
+  localizeMs: number;
+  meanLuma: number;
+  saturatedRatio: number;
+  bboxFrac: number;
+  recoveryActive: boolean;
+}
+
 export interface WorkerResultMessage {
   type: "result";
   id: number;
   scan: ScanResult | null;
+  metrics: WorkerFrameMetrics;
 }
 
 export interface WorkerErrorMessage {
