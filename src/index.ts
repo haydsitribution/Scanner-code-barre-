@@ -1,5 +1,7 @@
 export type {
   BarcodeFormat,
+  DecodeQuality,
+  FrameStats,
   ScanResult,
   WorkerInMessage,
   WorkerOutMessage,
@@ -13,6 +15,12 @@ export {
   type ScannerEngineOptions,
 } from "./core/scanner-engine";
 
+export type {
+  CameraCapabilitiesInfo,
+  CameraStream,
+  OpenCameraOptions,
+} from "./core/camera";
+
 export {
   useScanner,
   type UseScannerOptions,
@@ -22,6 +30,8 @@ export {
 export {
   BarcodeScannerView,
   type BarcodeScannerViewProps,
+  type HintKind,
+  type ScannerLabels,
 } from "./react/BarcodeScannerView";
 export {
   BarcodeScannerModal,
