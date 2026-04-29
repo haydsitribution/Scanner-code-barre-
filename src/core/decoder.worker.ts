@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import { prepareZXingModule, readBarcodes } from "zxing-wasm/reader";
+import { DeepRecovery } from "./deep-recovery";
 import { localize1D } from "./localizer";
 import {
   clahe,
@@ -84,6 +85,8 @@ function pushGray(frame: RingFrame): void {
 let modulePromise: Promise<unknown> | null = null;
 let canvas: OffscreenCanvas | null = null;
 let ctx: OffscreenCanvasRenderingContext2D | null = null;
+
+const deepRecovery = new DeepRecovery();
 
 function ensureModule(): Promise<unknown> {
   if (!modulePromise) {
@@ -202,6 +205,25 @@ async function decode(req: WorkerDecodeRequest): Promise<{
       recoveryActive = true;
       results = await readBarcodes(enhanced, readerOptions);
       scan = pickValid(results);
+    }
+  }
+
+  if (scan) {
+    deepRecovery.noteDetect();
+  } else {
+    deepRecovery.noteMiss(localized?.bbox ?? null);
+    if (deepRecovery.shouldAttempt()) {
+      const upscaled = deepRecovery.submit(gray, width, height);
+      if (upscaled) {
+        recoveryActive = true;
+        const r3 = await readBarcodes(upscaled, {
+          ...readerOptions,
+          tryHarder: true,
+          tryDenoise: true,
+        });
+        scan = pickValid(r3);
+        if (scan) deepRecovery.noteDetect();
+      }
     }
   }
 
