@@ -2,6 +2,12 @@
 
 import { prepareZXingModule, readBarcodes } from "zxing-wasm/reader";
 import { localize1D } from "./localizer";
+import {
+  clahe,
+  cropGray,
+  grayToRgbaImageData,
+  median3,
+} from "./preprocess";
 import type {
   BarcodeFormat,
   DecodeQuality,
@@ -173,8 +179,7 @@ async function decode(req: WorkerDecodeRequest): Promise<{
     }
   }
 
-  const decodeStart = performance.now();
-  const results = await readBarcodes(decodeImage, {
+  const readerOptions = {
     formats: formats as BarcodeFormat[],
     tryHarder: preset.tryHarder,
     tryRotate: preset.tryRotate,
@@ -184,20 +189,23 @@ async function decode(req: WorkerDecodeRequest): Promise<{
     binarizer: preset.binarizer,
     minLineCount: preset.minLineCount,
     maxNumberOfSymbols: 1,
-  });
-  const decodeMs = performance.now() - decodeStart;
+  } as const;
 
-  let scan: ScanResult | null = null;
-  for (const r of results) {
-    if (r.isValid && r.text) {
-      scan = {
-        code: r.text,
-        format: r.format as BarcodeFormat,
-        rawBytes: r.bytes,
-      };
-      break;
+  const decodeStart = performance.now();
+  let results = await readBarcodes(decodeImage, readerOptions);
+  let scan = pickValid(results);
+  let recoveryActive = false;
+
+  if (!scan && shouldRecover(saturatedRatio, meanLuma)) {
+    const enhanced = buildRecoveryImage(width, height, localized);
+    if (enhanced) {
+      recoveryActive = true;
+      results = await readBarcodes(enhanced, readerOptions);
+      scan = pickValid(results);
     }
   }
+
+  const decodeMs = performance.now() - decodeStart;
 
   return {
     scan,
@@ -207,9 +215,69 @@ async function decode(req: WorkerDecodeRequest): Promise<{
       meanLuma,
       saturatedRatio,
       bboxFrac,
-      recoveryActive: false,
+      recoveryActive,
     },
   };
+}
+
+function pickValid(
+  results: Awaited<ReturnType<typeof readBarcodes>>,
+): ScanResult | null {
+  for (const r of results) {
+    if (r.isValid && r.text) {
+      return {
+        code: r.text,
+        format: r.format as BarcodeFormat,
+        rawBytes: r.bytes,
+      };
+    }
+  }
+  return null;
+}
+
+function shouldRecover(saturatedRatio: number, meanLuma: number): boolean {
+  if (grayRing.length < RING_CAPACITY) return false;
+  if (saturatedRatio > 0.005) return true;
+  if (meanLuma < 60 || meanLuma > 210) return true;
+  return false;
+}
+
+function buildRecoveryImage(
+  width: number,
+  height: number,
+  localized: ReturnType<typeof localize1D>,
+): ImageData | null {
+  const f0 = grayRing[0];
+  const f1 = grayRing[1];
+  const f2 = grayRing[2];
+  if (!f0 || !f1 || !f2) return null;
+  if (f0.width !== width || f0.height !== height) return null;
+
+  const fullMedian = new Uint8ClampedArray(width * height);
+  median3(f0.gray, f1.gray, f2.gray, fullMedian);
+
+  let mw = width;
+  let mh = height;
+  let medianGray: Uint8ClampedArray = fullMedian;
+  if (localized) {
+    const pad = 12;
+    const x0 = Math.max(0, localized.bbox.x - pad);
+    const y0 = Math.max(0, localized.bbox.y - pad);
+    const x1 = Math.min(width, localized.bbox.x + localized.bbox.width + pad);
+    const y1 = Math.min(height, localized.bbox.y + localized.bbox.height + pad);
+    if (x1 - x0 >= 64 && y1 - y0 >= 32) {
+      mw = x1 - x0;
+      mh = y1 - y0;
+      medianGray = cropGray(fullMedian, width, x0, y0, mw, mh) as Uint8ClampedArray;
+    }
+  }
+
+  const enhanced = clahe(medianGray, mw, mh, {
+    gridX: mw >= 256 ? 8 : 4,
+    gridY: mh >= 128 ? 4 : 2,
+    clipLimit: 3,
+  });
+  return grayToRgbaImageData(enhanced, mw, mh);
 }
 
 self.addEventListener("message", (event: MessageEvent<WorkerInMessage>) => {
