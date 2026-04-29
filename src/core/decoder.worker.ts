@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import { prepareZXingModule, readBarcodes } from "zxing-wasm/reader";
+import { localize1D } from "./localizer";
 import type {
   BarcodeFormat,
   DecodeQuality,
@@ -151,8 +152,29 @@ async function decode(req: WorkerDecodeRequest): Promise<{
   const saturatedRatio = stats.saturated / (width * height);
   pushGray({ width, height, gray });
 
+  const localizeStart = performance.now();
+  const localized = localize1D(gray, width, height);
+  const localizeMs = performance.now() - localizeStart;
+
+  let decodeImage: ImageData = rgbaImage;
+  let bboxFrac = 1;
+  if (localized) {
+    const pad = 12;
+    const x0 = Math.max(0, localized.bbox.x - pad);
+    const y0 = Math.max(0, localized.bbox.y - pad);
+    const x1 = Math.min(width, localized.bbox.x + localized.bbox.width + pad);
+    const y1 = Math.min(height, localized.bbox.y + localized.bbox.height + pad);
+    const cw = x1 - x0;
+    const ch = y1 - y0;
+    const frac = (cw * ch) / (width * height);
+    if (frac < 0.92 && cw >= 64 && ch >= 32) {
+      decodeImage = c.getImageData(x0, y0, cw, ch);
+      bboxFrac = frac;
+    }
+  }
+
   const decodeStart = performance.now();
-  const results = await readBarcodes(rgbaImage, {
+  const results = await readBarcodes(decodeImage, {
     formats: formats as BarcodeFormat[],
     tryHarder: preset.tryHarder,
     tryRotate: preset.tryRotate,
@@ -181,10 +203,10 @@ async function decode(req: WorkerDecodeRequest): Promise<{
     scan,
     metrics: {
       decodeMs,
-      localizeMs: 0,
+      localizeMs,
       meanLuma,
       saturatedRatio,
-      bboxFrac: 0,
+      bboxFrac,
       recoveryActive: false,
     },
   };
