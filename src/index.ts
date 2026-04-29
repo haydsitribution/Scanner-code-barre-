@@ -30,6 +30,8 @@ export {
 export {
   BarcodeScannerView,
   type BarcodeScannerViewProps,
+  type HintKind,
+  type ScannerLabels,
 } from "./react/BarcodeScannerView";
 export {
   BarcodeScannerModal,
